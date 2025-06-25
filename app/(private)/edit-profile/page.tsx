@@ -9,12 +9,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { profileSchema, type ProfileFormData } from "@/lib/validations";
 import { useAppStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
+import { AuthGuard } from "@/components/auth-guard";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import Link from "next/link";
 
-export default function EditProfilePage() {
+function EditProfileContent() {
   const { showToast } = useAppStore();
+  const { user, logout } = useAuth();
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -23,14 +26,17 @@ export default function EditProfilePage() {
     isLoading,
     error,
     refetch,
+    dataUpdatedAt,
   } = useQuery({
     queryKey: ["profile"],
     queryFn: async () => {
+      console.log("Fetching profile data...");
       try {
         const response = await fetch("/api/profile", {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
           },
           cache: "no-store",
         });
@@ -40,6 +46,7 @@ export default function EditProfilePage() {
         }
 
         const result = await response.json();
+        console.log("Profile data fetched:", result);
 
         if (!result.success) {
           throw new Error(result.error || "Failed to fetch profile");
@@ -52,6 +59,7 @@ export default function EditProfilePage() {
       }
     },
     staleTime: 0,
+    gcTime: 0,
     refetchOnWindowFocus: true,
     refetchOnMount: true,
     retry: 3,
@@ -61,9 +69,10 @@ export default function EditProfilePage() {
   const {
     register,
     handleSubmit,
-    formState: { errors, isDirty },
+    formState: { errors, isDirty, isSubmitting },
     reset,
     setValue,
+    watch,
   } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
@@ -75,30 +84,46 @@ export default function EditProfilePage() {
     },
   });
 
+  const watchedValues = watch();
+
+  const resetFormWithProfileData = useCallback(
+    (data: any) => {
+      if (data) {
+        console.log("Resetting form with data:", data);
+        const formData = {
+          name: data.name || "",
+          bio: data.bio || "",
+          email: data.email || "",
+          phone: data.phone || "",
+          location: data.location || "",
+        };
+
+        Object.entries(formData).forEach(([key, value]) => {
+          setValue(key as keyof ProfileFormData, value);
+        });
+
+        reset(formData);
+        console.log("Form reset complete with values:", formData);
+      }
+    },
+    [setValue, reset]
+  );
+
   useEffect(() => {
     if (profileData) {
-      setValue("name", profileData.name || "");
-      setValue("bio", profileData.bio || "");
-      setValue("email", profileData.email || "");
-      setValue("phone", profileData.phone || "");
-      setValue("location", profileData.location || "");
-      reset({
-        name: profileData.name || "",
-        bio: profileData.bio || "",
-        email: profileData.email || "",
-        phone: profileData.phone || "",
-        location: profileData.location || "",
-      });
+      resetFormWithProfileData(profileData);
     }
-  }, [profileData, setValue, reset]);
+  }, [profileData, dataUpdatedAt, resetFormWithProfileData]);
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data: ProfileFormData) => {
+      console.log("Updating profile with data:", data);
       try {
         const response = await fetch("/api/profile", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
           },
           body: JSON.stringify(data),
         });
@@ -108,6 +133,7 @@ export default function EditProfilePage() {
         }
 
         const result = await response.json();
+        console.log("Profile update response:", result);
 
         if (!result.success) {
           throw new Error(result.error || "Failed to update profile");
@@ -120,8 +146,10 @@ export default function EditProfilePage() {
       }
     },
     onMutate: async (newData) => {
+      console.log("Mutation starting with data:", newData);
       await queryClient.cancelQueries({ queryKey: ["profile"] });
       const previousProfile = queryClient.getQueryData(["profile"]);
+      console.log("Previous profile data:", previousProfile);
       const optimisticData = {
         ...(previousProfile as object),
         ...newData,
@@ -129,39 +157,54 @@ export default function EditProfilePage() {
       };
 
       queryClient.setQueryData(["profile"], optimisticData);
+      console.log("Optimistic update applied:", optimisticData);
+
       return { previousProfile };
     },
     onError: (error, newData, context) => {
+      console.error("Mutation error:", error);
       if (context?.previousProfile) {
         queryClient.setQueryData(["profile"], context.previousProfile);
+        console.log("Rolled back to previous data:", context.previousProfile);
       }
       showToast(error.message || "Failed to update profile", "error");
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      console.log("Mutation success:", data);
       queryClient.setQueryData(["profile"], data.data);
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-      refetch();
       showToast(data.message || "Profile updated successfully!", "success");
-      reset({
-        name: data.data.name || "",
-        bio: data.data.bio || "",
-        email: data.data.email || "",
-        phone: data.data.phone || "",
-        location: data.data.location || "",
-      });
+      resetFormWithProfileData(data.data);
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["profile"] });
-      refetch();
+    onSettled: async () => {
+      console.log("Mutation settled, invalidating queries...");
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      await refetch();
     },
   });
 
-  const onSubmit = (data: ProfileFormData) => {
-    updateProfileMutation.mutate(data);
-  };
+  const onSubmit = useCallback(
+    (data: ProfileFormData) => {
+      console.log("Form submitted with data:", data);
+      console.log("Current watched values:", watchedValues);
+      updateProfileMutation.mutate(data);
+    },
+    [updateProfileMutation, watchedValues]
+  );
 
-  const handlePreviewProfile = () => {
+  const handlePreviewProfile = useCallback(() => {
     router.push("/profile");
+  }, [router]);
+
+  const handleRefresh = useCallback(async () => {
+    console.log("Manual refresh triggered");
+    await queryClient.invalidateQueries({ queryKey: ["profile"] });
+    await refetch();
+  }, [queryClient, refetch]);
+
+  const handleLogout = () => {
+    logout();
+    showToast("Logged out successfully", "success");
+    router.push("/login");
   };
 
   if (isLoading) {
@@ -169,7 +212,10 @@ export default function EditProfilePage() {
       <div className="container mx-auto py-8">
         <Card className="max-w-2xl mx-auto">
           <CardContent className="flex items-center justify-center p-8">
-            <p>Loading profile data...</p>
+            <div className="flex items-center gap-3">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+              <p>Loading profile data...</p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -182,9 +228,17 @@ export default function EditProfilePage() {
         <Card className="max-w-2xl mx-auto">
           <CardContent className="p-8 text-center">
             <p className="text-destructive mb-4">Failed to load profile data</p>
-            <Button onClick={() => refetch()} variant="outline">
-              Try Again
-            </Button>
+            <p className="text-sm text-muted-foreground mb-4">
+              {error.message}
+            </p>
+            <div className="flex gap-2 justify-center">
+              <Button onClick={handleRefresh} variant="outline">
+                Try Again
+              </Button>
+              <Link href="/profile">
+                <Button variant="outline">Go to Profile</Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -198,9 +252,9 @@ export default function EditProfilePage() {
           {/* Header Section */}
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-2 bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-slate-200 mb-6">
-              <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
               <span className="text-sm font-medium text-slate-600">
-                Edit Mode
+                Logged in as {user?.name || user?.email}
               </span>
             </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-900 bg-clip-text text-transparent mb-3">
@@ -234,14 +288,58 @@ export default function EditProfilePage() {
                   </div>
                   <span className="text-xl">Profile Information</span>
                 </div>
-                {isDirty && (
-                  <div className="flex items-center gap-2 bg-orange-500/20 backdrop-blur-sm px-3 py-1 rounded-full border border-orange-300/30">
-                    <div className="w-2 h-2 bg-orange-300 rounded-full animate-pulse"></div>
-                    <span className="text-sm font-medium text-orange-100">
-                      Unsaved changes
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center gap-3">
+                  {isDirty && (
+                    <div className="flex items-center gap-2 bg-orange-500/20 backdrop-blur-sm px-3 py-1 rounded-full border border-orange-300/30">
+                      <div className="w-2 h-2 bg-orange-300 rounded-full animate-pulse"></div>
+                      <span className="text-sm font-medium text-orange-100">
+                        Unsaved changes
+                      </span>
+                    </div>
+                  )}
+                  <Button
+                    onClick={handleRefresh}
+                    variant="outline"
+                    size="sm"
+                    className="bg-white/20 border-white/30 text-white hover:bg-white/30"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    Refresh
+                  </Button>
+                  <Button
+                    onClick={handleLogout}
+                    variant="outline"
+                    size="sm"
+                    className="bg-red-500/20 border-red-300/30 text-red-100 hover:bg-red-500/30"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                      />
+                    </svg>
+                    Logout
+                  </Button>
+                </div>
               </CardTitle>
             </CardHeader>
 
@@ -562,10 +660,14 @@ export default function EditProfilePage() {
                 <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-slate-200">
                   <Button
                     type="submit"
-                    disabled={updateProfileMutation.isPending || !isDirty}
+                    disabled={
+                      updateProfileMutation.isPending ||
+                      !isDirty ||
+                      isSubmitting
+                    }
                     className="flex-1 h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {updateProfileMutation.isPending ? (
+                    {updateProfileMutation.isPending || isSubmitting ? (
                       <>
                         <svg
                           className="w-4 h-4 mr-2 animate-spin"
@@ -661,5 +763,13 @@ export default function EditProfilePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function EditProfilePage() {
+  return (
+    <AuthGuard>
+      <EditProfileContent />
+    </AuthGuard>
   );
 }

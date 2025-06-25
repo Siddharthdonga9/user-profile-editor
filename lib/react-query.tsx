@@ -16,16 +16,22 @@ export function ReactQueryProvider({
         defaultOptions: {
           queries: {
             staleTime: 0,
+            gcTime: 1000 * 60 * 5,
             refetchOnWindowFocus: true,
             refetchOnMount: true,
+            refetchOnReconnect: true,
             retry: 3,
+            retryDelay: (attemptIndex) =>
+              Math.min(1000 * 2 ** attemptIndex, 30000),
           },
           mutations: {
             retry: 1,
+            retryDelay: 1000,
           },
         },
       })
   );
+
   return (
     <QueryClientProvider client={queryClient}>
       {children}

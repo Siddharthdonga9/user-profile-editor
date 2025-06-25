@@ -6,31 +6,40 @@ let profileData = {
   phone: "+1 (555) 123-4567",
   location: "San Francisco, CA",
   updatedAt: new Date().toISOString(),
-}
+};
 
 export async function getProfile() {
   try {
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    return { ...profileData }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    return JSON.parse(JSON.stringify(profileData));
   } catch (error) {
-    console.error("Profile service error:", error)
-    throw new Error("Failed to get profile data")
+    console.error("Profile service error:", error);
+    throw new Error("Failed to get profile data");
   }
 }
 
 export async function updateProfile(updates: Partial<typeof profileData>) {
   try {
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-    profileData = {
+    const updatedProfile = {
       ...profileData,
       ...updates,
       updatedAt: new Date().toISOString(),
-    }
+    };
 
-    return { ...profileData }
+    profileData = updatedProfile;
+
+    console.log("Profile updated successfully:", updatedProfile);
+
+    return JSON.parse(JSON.stringify(updatedProfile));
   } catch (error) {
-    console.error("Profile update service error:", error)
-    throw new Error("Failed to update profile data")
+    console.error("Profile update service error:", error);
+    throw new Error("Failed to update profile data");
   }
+}
+
+export function getCurrentTimestamp() {
+  return new Date().toISOString();
 }

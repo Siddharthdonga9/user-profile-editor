@@ -2,16 +2,23 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { getProfile } from "@/lib/profile-service";
+import { ProfileRefreshButton } from "@/components/profile-refresh-button";
+
+// Force dynamic rendering to always get fresh data
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function ProfilePage() {
   let profile;
   let error = null;
 
   try {
+    console.log("Server: Fetching profile data...");
     profile = await getProfile();
+    console.log("Server: Profile data fetched:", profile);
   } catch (err) {
     error = "Failed to load profile data";
-    console.error("Profile fetch error:", err);
+    console.error("Server: Profile fetch error:", err);
   }
 
   if (error || !profile) {
@@ -20,9 +27,12 @@ export default async function ProfilePage() {
         <Card className="max-w-2xl mx-auto">
           <CardContent className="p-8 text-center">
             <p className="text-destructive mb-4">Failed to load profile data</p>
-            <Link href="/edit-profile">
-              <Button variant="outline">Go to Edit Profile</Button>
-            </Link>
+            <div className="flex gap-2 justify-center">
+              <ProfileRefreshButton />
+              <Link href="/edit-profile">
+                <Button variant="outline">Go to Edit Profile</Button>
+              </Link>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -226,6 +236,7 @@ export default async function ProfilePage() {
                 </div>
               </div>
 
+              {/* Footer Info */}
               <div className="text-center pt-6 border-t border-slate-200">
                 <div className="inline-flex items-center gap-2 text-sm text-slate-500 bg-slate-50 px-4 py-2 rounded-full">
                   <svg
@@ -256,7 +267,9 @@ export default async function ProfilePage() {
             </CardContent>
           </Card>
 
+          {/* Action Buttons */}
           <div className="flex justify-center gap-4">
+            <ProfileRefreshButton />
             <Link href="/edit-profile">
               <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transition-all duration-200">
                 <svg
